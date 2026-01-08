@@ -1,0 +1,6 @@
+id,timestamp,amount_cents,currency,status
+1,2025-01-01T10:00:00Z,1000,USD,completed
+2,2025-01-01T10:05:00Z,-500,USD,completed
+3,2025-01-01T10:10:00Z,0,USD,failed
+4,2025-01-01T10:15:00Z,2500,EUR,completed
+5,2025-01-01T10:20:00Z,foo,USD,completed
