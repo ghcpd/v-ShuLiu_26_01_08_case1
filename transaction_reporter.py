@@ -1,86 +1,83 @@
-import csv
+"""Lightweight CLI around the reporting library.
+
+This module preserves the original public entry point `generate_report(csv_path)`
+and the CLI behaviour while delegating implementation to smaller components in
+the `transactions` package.
+"""
+from __future__ import annotations
+
 import sys
+import argparse
+import json
 from typing import Dict, Any
+
+from transactions import reader as reader_mod
+from transactions import aggregator as agg_mod
+from transactions import formatters
 
 
 def generate_report(csv_path: str) -> Dict[str, Any]:
-    """Baseline implementation: load all rows into memory and compute simple aggregates.
+    """Backward-compatible function that returns the same flat dict as before.
 
-    This function is intentionally simple and somewhat inefficient; your enhancement
-    task should preserve the semantics of the returned dict for valid inputs while
-    improving structure and extensibility in new code.
+    Internally this streams rows, computes a structured report, and then
+    returns the baseline scalar aggregates to keep callers a stable behavior.
     """
-    rows = []
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(row)
+    rows = reader_mod.stream_transactions(csv_path)
+    structured = agg_mod.compute_report(rows)
 
-    total_rows = len(rows)
-    completed = 0
-    failed = 0
-    sum_completed_amount = 0
-    sum_all_amount = 0
-
-    for row in rows:
-        status = row.get("status", "").strip()
-        amount_raw = row.get("amount_cents", "0").strip()
-        try:
-            amount = int(amount_raw)
-        except ValueError:
-            # Treat invalid amount as 0 in the baseline implementation
-            amount = 0
-
-        sum_all_amount += amount
-
-        if status == "completed":
-            completed += 1
-            sum_completed_amount += amount
-        elif status == "failed":
-            failed += 1
-
-    avg_amount = sum_all_amount / total_rows if total_rows > 0 else 0.0
-
+    # Preserve the original flat dict contract
     return {
-        "total_rows": total_rows,
-        "completed": completed,
-        "failed": failed,
-        "sum_completed_amount": sum_completed_amount,
-        "avg_amount": avg_amount,
+        "total_rows": structured["summary"]["total_rows"],
+        "completed": structured["summary"]["completed"],
+        "failed": structured["summary"]["failed"],
+        "sum_completed_amount": structured["summary"]["sum_completed_amount"],
+        "avg_amount": structured["summary"]["avg_amount"],
     }
 
 
-def _format_report(report: Dict[str, Any]) -> str:
-    lines = [
-        "Transaction report:",
-        f"  total_rows: {report['total_rows']}",
-        f"  completed: {report['completed']}",
-        f"  failed: {report['failed']}",
-        f"  sum_completed_amount: {report['sum_completed_amount']}",
-        f"  avg_amount: {report['avg_amount']}",
-    ]
-    return "\n".join(lines)
+def _print_default(report: Dict[str, Any]) -> None:
+    print("Transaction report:")
+    print(f"  total_rows: {report['summary']['total_rows']}")
+    print(f"  completed: {report['summary']['completed']}")
+    print(f"  failed: {report['summary']['failed']}")
+    print(f"  sum_completed_amount: {report['summary']['sum_completed_amount']}")
+    print(f"  avg_amount: {report['summary']['avg_amount']}")
 
 
 def main(argv=None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    if not argv:
-        print("Usage: python transaction_reporter.py <path_to_transactions_csv>")
-        return 1
+    parser = argparse.ArgumentParser(
+        description="Generate a small transaction summary report"
+    )
+    parser.add_argument("csv_path", help="path to transactions CSV")
+    parser.add_argument("-f", "--format", choices=["text", "json"], default="text", help="output format")
+    parser.add_argument("-v", "--verbose", action="store_true", help="print extra diagnostics to stderr")
 
-    csv_path = argv[0]
+    args = parser.parse_args(argv)
+
     try:
-        report = generate_report(csv_path)
+        rows = reader_mod.stream_transactions(args.csv_path)
+        structured = agg_mod.compute_report(rows)
     except FileNotFoundError:
-        print(f"Error: file not found: {csv_path}")
+        print(f"Error: file not found: {args.csv_path}")
         return 2
-    except Exception as e:  # baseline: very simple catch-all
-        print(f"Error while processing {csv_path}: {e}")
+    except Exception as e:
+        print(f"Error while processing {args.csv_path}: {e}")
         return 3
 
-    print(_format_report(report))
+    if args.verbose:
+        # Print small diagnostics to stderr
+        meta = structured.get("meta", {})
+        print(f"# diagnostics: rows_read={meta.get('rows_read', 0)} rows_invalid={meta.get('rows_invalid', 0)} duration_s={meta.get('duration_s', 0):.6f}", file=sys.stderr)
+
+    if args.format == "json":
+        print(formatters.format_json(structured))
+    else:
+        # default: text (keeps the original textual layout)
+        _print_default(structured)
+
     return 0
 
 
