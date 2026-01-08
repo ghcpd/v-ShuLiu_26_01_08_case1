@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Run the full test suite with a single command.
+
+This script prefers pytest if available, otherwise falls back to the
+standard-library unittest runner. It uses only the Python standard library so
+it will work on a clean machine.
+"""
+import subprocess
+import sys
+import shutil
+
+if shutil.which("pytest"):
+    rc = subprocess.call([sys.executable, "-m", "pytest", "-q"])
+else:
+    rc = subprocess.call([sys.executable, "-m", "unittest", "discover", "-v"]) 
+
+sys.exit(rc)
