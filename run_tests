@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""One-command test runner for the transaction reporter tool.
+
+This script uses only the Python standard library to run the full test suite.
+It attempts to use pytest if available, otherwise falls back to unittest.
+
+Usage:
+    python run_tests
+    or on Unix-like systems:
+    ./run_tests
+
+Exit codes:
+    0 - All tests passed
+    1 - Tests failed or error occurred
+"""
+import subprocess
+import sys
+
+
+def main() -> int:
+    """Run the test suite and return exit code."""
+    
+    # Try using pytest first if available
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "-v", "test_transaction_reporter.py"],
+            cwd=None
+        )
+        return result.returncode
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+    
+    # Fall back to unittest
+    print("pytest not available, using unittest instead")
+    result = subprocess.run(
+        [sys.executable, "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py", "-v"],
+        cwd=None
+    )
+    return result.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())
