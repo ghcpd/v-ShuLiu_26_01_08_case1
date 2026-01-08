@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Run the project's tests in a cross-platform way using only the standard library.
+
+If pytest is installed it will be used (for nicer output), otherwise falls back to
+unittest discovery. Exits with a non-zero status on test failures.
+"""
+import sys
+import subprocess
+
+try:
+    import pytest  # type: ignore
+except Exception:
+    # fall back to unittest
+    import unittest
+
+    loader = unittest.TestLoader()
+    suite = loader.discover('.', pattern='test_*.py')
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    sys.exit(0 if result.wasSuccessful() else 1)
+else:
+    # use pytest runner
+    sys.exit(pytest.main(['-q']))

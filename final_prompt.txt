@@ -1,0 +1,146 @@
+1. Role & Objective
+You are an expert AI programming assistant (using only the Python standard library) tasked with enhancing an existing internal command-line transaction reporting tool while strictly preserving its observable behavior for current users.
+
+2. Inputs & Context
+- You receive a small Python codebase containing a single baseline script named `transaction_reporter.py` and an example CSV file (for example, `examples/sample_transactions.csv`).
+- The baseline script currently:
+  - Exposes a function: `def generate_report(csv_path: str) -> dict`.
+  - Exposes a CLI entrypoint: `python transaction_reporter.py path/to/transactions.csv`.
+  - Reads a CSV where each row is a transaction with columns: `id`, `timestamp`, `amount_cents`, `currency`, `status`.
+  - Uses only Python standard library modules.
+  - Reads the entire CSV into memory before processing.
+  - Computes and returns a flat dict of aggregates:
+    - `total number of rows`.
+    - `number of completed transactions`.
+    - `number of failed transactions`.
+    - `sum of amount_cents` for completed transactions.
+    - `overall average amount_cents` for all rows.
+  - Prints a human-readable plain-text summary to stdout when invoked from the CLI; the structure and numbers of this summary are part of the public contract.
+- You must assume the baseline script behaves correctly for well-formed CSV inputs and that it is currently in production use by analysts.
+
+3. Step-by-Step Instructions
+3.1 Analyze Baseline
+- Inspect the existing `transaction_reporter.py` implementation and the sample CSV file.
+- Infer precisely what aggregates are computed and how invalid numeric `amount_cents` values are handled (baseline behavior treats invalid values as 0).
+- Record the baseline CLI text output format for a sample CSV (including line order and exact labels) and the exact structure and semantics of the dict returned from `generate_report`.
+
+3.2 Design Modular Architecture
+- Refactor the implementation into clear, testable components while preserving the external behavior:
+  - Reader component: Streams transaction rows from a CSV file as dictionaries, using `csv.DictReader`, without loading the entire file into memory.
+  - Core/aggregator component: Consumes an iterator of row dicts and computes all required metrics and any new internal metrics.
+  - Formatter components: Convert an in-memory structured report into specific output formats (e.g., text and JSON), ensuring all formats are derived from the same in-memory data.
+  - CLI layer: Handles argument parsing, configuration, and wiring together the reader, aggregator, and formatter.
+- Introduce an internal structured report representation (for example, a nested dict such as `{"summary": {...}, "meta": {...}}`) that contains at least:
+  - `summary`: the aggregates required by the original contract.
+  - `meta`: basic observability data (e.g., counts of rows read, invalid rows, and elapsed processing time in seconds).
+- Ensure that the new architecture allows easy future extension for additional metrics, formats, or batching strategies without changing the core public API.
+
+3.3 Preserve the Programmatic API
+- Keep the public function signature `generate_report(csv_path: str) -> dict` intact and callable from the top-level module.
+- Re-implement `generate_report` as a thin facade that:
+  - Uses the new streaming reader to obtain an iterator of transaction rows.
+  - Uses the new aggregator to compute the structured internal report.
+  - Extracts and returns a flat dict of simple scalar values matching the baseline keys and semantics exactly:
+    - `total_rows`.
+    - `completed`.
+    - `failed`.
+    - `sum_completed_amount`.
+    - `avg_amount`.
+- Verify that for the same well-formed CSV input, the new `generate_report` returns aggregate values identical to the original implementation.
+
+3.4 Preserve & Enhance CLI Behavior
+- Keep the default CLI entrypoint semantics the same: running `python transaction_reporter.py path/to/file.csv` must still print a human-readable summary whose metrics and values are semantically equivalent to the baseline (same numbers, labels, and structure where practical).
+- Implement the CLI layer using only the Python standard library (for example, `argparse`) with the following behavior:
+  - Required positional argument: `<csv_path>` pointing to the transactions CSV file.
+  - Default behavior (no extra flags): generate the structured report and render it as the original-style plain-text summary using a formatter that replicates the baseline output.
+  - New optional flag: output format selection, e.g., `-f/--format` with at least `text` (default) and `json`.
+    - `text` format must match the baseline summary content and structure for existing use cases.
+    - `json` format must output a machine-friendly JSON representation of the structured report (e.g., including both `summary` and `meta` sections).
+  - New optional flag for diagnostics, e.g., `-v/--verbose`, which prints minimal extra diagnostic information (such as row counts and timing) to stderr without changing stdout format or breaking existing scripts.
+- Ensure new CLI options do not alter the default behavior when not provided.
+
+3.5 Performance and Scalability Improvements
+- Replace any "read entire file into a list" logic for transaction rows with streaming-style processing using iterators/generators.
+- Ensure the aggregator processes the CSV in a single pass over the iterator, keeping only minimal state needed for the metrics.
+- Design the architecture so that future improvements such as batching or windowed aggregation can be introduced without large-scale rewrites.
+
+3.6 Robustness and Observability
+- Maintain the baseline rule that invalid `amount_cents` values are treated as 0 for aggregation purposes.
+- Improve error handling while preserving behavior for valid inputs:
+  - For missing files, exit with a non-zero code and print a clear error message to stdout or stderr that indicates the file was not found.
+  - For malformed rows, handle them gracefully without crashing; use best-effort parsing and treat invalid numeric values as 0.
+- Add basic observability metrics (in the `meta` section of the structured report), including at least:
+  - `rows_read`: total number of rows processed.
+  - `rows_invalid`: count of rows with invalid numeric values or other recoverable issues.
+  - `duration_s`: total processing time in seconds (floating point).
+- Ensure logging or diagnostics are not noisy by default; only emit extra details when explicitly requested via CLI flags.
+
+3.7 Testing and Validation
+- Introduce an automated test suite that uses only the Python standard library (or pytest if available at runtime) and covers at least:
+  - Programmatic API tests:
+    - For a representative sample CSV, `generate_report` returns the exact expected aggregate dict (matching baseline values for counts, sums, and averages).
+  - CLI tests (invoking `transaction_reporter.py` via a subprocess or equivalent):
+    - Default text output: verify the exit code is 0 and that stdout exactly matches the expected text summary for a known sample CSV.
+    - JSON output: with the appropriate `-f/--format json` flag, verify that stdout parses as JSON and that the `summary` section contains the expected metrics and values.
+    - Error handling: invoking the CLI with a missing file path returns a non-zero exit code and a clear error message mentioning that the file was not found.
+- Use these tests to guard the semantic guarantees that aggregates and default text outputs remain unchanged relative to the baseline.
+
+3.8 One-Command Test Runner
+- At the repository root, add an executable script named `run_tests` that:
+  - Is runnable via `./run_tests` and also via `python run_tests`.
+  - Uses only the Python standard library to prepare and invoke tests.
+  - Behavior:
+    - If `pytest` is importable, run the full test suite using pytest.
+    - Otherwise, fall back to discovering and running tests via `unittest` (for example, discovering files named `test_*.py`).
+  - Exits with code 0 only if all tests pass; otherwise exits with a non-zero status.
+
+3.9 Documentation & Environment
+- Create or update a `README.md` at the repository root that includes:
+  - A concise description of the transaction reporting tool and its purpose.
+  - A summary of the original limitations (monolithic script, high memory use, mixed concerns, lack of structured output, minimal error handling) and how your design addresses them (modularity, streaming, structured report, better error handling, observability).
+  - An overview of the new internal architecture, listing each module and its responsibilities (reader, aggregator, formatters, CLI entrypoint).
+  - Environment and setup instructions, including:
+    - Required Python version: specify a concrete version such as Python 3.10+.
+    - Assumption that the tool runs correctly on Windows (e.g., Windows 10 or later), but remains cross-platform when possible.
+    - A note that no third-party libraries or external system tools are required.
+  - Exact instructions for running tests via `./run_tests` (and optionally `python run_tests`).
+  - At least one concrete before/after example using a sample CSV:
+    - Original-style text output (default CLI invocation).
+    - Enhanced output mode for the same CSV (e.g., JSON format via `-f json`).
+
+4. Output Specification
+- Code:
+  - A refactored `transaction_reporter.py` that:
+    - Exposes `generate_report(csv_path: str) -> dict` with unchanged semantics.
+    - Implements the CLI with default text output plus at least one additional output mode (JSON) and optional verbose diagnostics.
+  - A small internal package or module structure (for example, a `transactions` package) that contains:
+    - A streaming CSV reader.
+    - An aggregator that returns a structured report including `summary` and `meta`.
+    - Formatters for text and JSON output, both derived from the structured report.
+- Tests:
+  - A complete test suite that validates both programmatic and CLI behavior against baseline semantics and new output modes.
+- Test runner:
+  - An executable `run_tests` script at the repository root that runs the full test suite and exits with code 0 only on success.
+- Documentation:
+  - A `README.md` with the content and examples described above.
+
+5. Constraints & Preferences
+- Use only the Python standard library; do not introduce any third-party dependencies or require external system tools.
+- Preserve the interpretation of existing CSV columns (`id`, `timestamp`, `amount_cents`, `currency`, `status`) and the meaning of all existing aggregates.
+- For well-formed inputs, default-path aggregates (counts, sums, averages) must remain consistent with the original tool.
+- The default CLI summary output must remain semantically equivalent to the baseline and safe for existing automation and human users who rely on it.
+- New CLI options must not alter behavior when not provided.
+- Design for clarity and maintainability: separate concerns between reading, aggregation, formatting, and CLI wiring.
+
+6. Quality Gates
+- Confirm that for a known sample CSV, the new `generate_report` returns exactly the same aggregate dict as the original implementation.
+- Confirm that the default CLI invocation prints a summary whose metrics and values match the baseline for the same input.
+- Confirm that the JSON output mode faithfully represents the same summary data plus observability metadata.
+- Confirm that missing or invalid input files produce clear error messages and non-zero exit codes without stack traces leaking to users.
+- Confirm that `./run_tests` (or `python run_tests`) executes all tests and that all tests pass on a clean environment with only the specified Python version available.
+
+7. Critical Compliance Instructions (End)
+- Do not change the function signature or high-level semantics of `generate_report(csv_path: str) -> dict`.
+- Do not change the semantics of the default CLI behavior for valid inputs; only extend it with new options that leave the default path intact.
+- Do not rely on any libraries or tools outside the Python standard library.
+- Ensure your final code, tests, and documentation yield a fully working, single-command-testable project that can run on a clean Windows environment with the specified Python version.
