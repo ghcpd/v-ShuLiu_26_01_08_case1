@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""Run the project's test suite.
+
+This script prefers pytest if available, otherwise falls back to unittest discovery.
+It uses only the Python standard library to prepare and run the test command.
+"""
+import sys
+import subprocess
+
+try:
+    import pytest  # type: ignore
+except Exception:
+    cmd = [sys.executable, "-m", "unittest", "discover", "-v"]
+else:
+    cmd = [sys.executable, "-m", "pytest", "-q"]
+
+rc = subprocess.call(cmd)
+sys.exit(rc)
