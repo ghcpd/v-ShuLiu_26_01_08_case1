@@ -1,87 +1,112 @@
-import csv
 import sys
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+from reader import TransactionReader
+from aggregator import MetricsAggregator
+from formatters import get_formatter
 
 
 def generate_report(csv_path: str) -> Dict[str, Any]:
-    """Baseline implementation: load all rows into memory and compute simple aggregates.
+    """Generate a transaction report with the same semantics as baseline.
 
-    This function is intentionally simple and somewhat inefficient; your enhancement
-    task should preserve the semantics of the returned dict for valid inputs while
-    improving structure and extensibility in new code.
+    Reads transactions from the CSV file and computes aggregates. This function
+    maintains backward compatibility with the original API.
+    
+    Args:
+        csv_path: Path to the CSV file.
+    
+    Returns:
+        Dict with keys: total_rows, completed, failed, sum_completed_amount, avg_amount.
     """
-    rows = []
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(row)
-
-    total_rows = len(rows)
-    completed = 0
-    failed = 0
-    sum_completed_amount = 0
-    sum_all_amount = 0
-
-    for row in rows:
-        status = row.get("status", "").strip()
-        amount_raw = row.get("amount_cents", "0").strip()
-        try:
-            amount = int(amount_raw)
-        except ValueError:
-            # Treat invalid amount as 0 in the baseline implementation
-            amount = 0
-
-        sum_all_amount += amount
-
-        if status == "completed":
-            completed += 1
-            sum_completed_amount += amount
-        elif status == "failed":
-            failed += 1
-
-    avg_amount = sum_all_amount / total_rows if total_rows > 0 else 0.0
-
-    return {
-        "total_rows": total_rows,
-        "completed": completed,
-        "failed": failed,
-        "sum_completed_amount": sum_completed_amount,
-        "avg_amount": avg_amount,
-    }
+    reader = TransactionReader(csv_path)
+    aggregator = MetricsAggregator()
+    
+    # Stream process transactions
+    aggregator.process_transactions(reader.read())
+    
+    # Return only the flat dict metrics for backward compatibility
+    return aggregator.get_metrics()
 
 
-def _format_report(report: Dict[str, Any]) -> str:
-    lines = [
-        "Transaction report:",
-        f"  total_rows: {report['total_rows']}",
-        f"  completed: {report['completed']}",
-        f"  failed: {report['failed']}",
-        f"  sum_completed_amount: {report['sum_completed_amount']}",
-        f"  avg_amount: {report['avg_amount']}",
-    ]
-    return "\n".join(lines)
+def generate_full_report(csv_path: str) -> Dict[str, Any]:
+    """Generate a full structured report including observability data.
+    
+    This is the enhanced API that exposes the full report structure.
+    
+    Args:
+        csv_path: Path to the CSV file.
+    
+    Returns:
+        Full report dict with metrics and observability.
+    """
+    reader = TransactionReader(csv_path)
+    aggregator = MetricsAggregator()
+    aggregator.process_transactions(reader.read())
+    return aggregator.get_full_report()
 
 
-def main(argv=None) -> int:
+def main(argv: Optional[list] = None) -> int:
+    """CLI entry point with support for multiple output formats.
+    
+    Args:
+        argv: Command-line arguments (defaults to sys.argv[1:]).
+    
+    Returns:
+        Exit code (0 for success, non-zero for error).
+    """
     if argv is None:
         argv = sys.argv[1:]
 
-    if not argv:
-        print("Usage: python transaction_reporter.py <path_to_transactions_csv>")
+    # Parse command-line arguments
+    csv_path = None
+    output_format = "text"  # Default to text for backward compatibility
+    
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("--format", "-f"):
+            if i + 1 >= len(argv):
+                print("Error: --format requires an argument")
+                return 1
+            output_format = argv[i + 1]
+            i += 2
+        elif arg.startswith("-"):
+            print(f"Error: unknown option: {arg}")
+            return 1
+        else:
+            csv_path = arg
+            i += 1
+    
+    if not csv_path:
+        print("Usage: python transaction_reporter.py [--format {text|json}] <path_to_transactions_csv>")
         return 1
 
-    csv_path = argv[0]
     try:
-        report = generate_report(csv_path)
+        # Use the full report for all output modes
+        full_report = generate_full_report(csv_path)
+        metrics = full_report["metrics"]
+        
+        # Get the appropriate formatter
+        formatter_class = get_formatter(output_format)
+        
+        # Format and output
+        if output_format == "json":
+            output = formatter_class.format(metrics, pretty=True)
+        else:
+            output = formatter_class.format(metrics)
+        
+        print(output)
+        return 0
+        
     except FileNotFoundError:
         print(f"Error: file not found: {csv_path}")
         return 2
-    except Exception as e:  # baseline: very simple catch-all
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 3
+    except Exception as e:
         print(f"Error while processing {csv_path}: {e}")
         return 3
-
-    print(_format_report(report))
-    return 0
 
 
 if __name__ == "__main__":
