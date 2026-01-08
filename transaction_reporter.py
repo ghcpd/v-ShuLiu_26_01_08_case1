@@ -1,86 +1,145 @@
 import csv
 import sys
-from typing import Dict, Any
+import json
+import argparse
+import os
+from typing import Dict, Any, Iterator
 
 
-def generate_report(csv_path: str) -> Dict[str, Any]:
-    """Baseline implementation: load all rows into memory and compute simple aggregates.
+class TransactionReader:
+    """Streams transactions from a CSV file."""
 
-    This function is intentionally simple and somewhat inefficient; your enhancement
-    task should preserve the semantics of the returned dict for valid inputs while
-    improving structure and extensibility in new code.
-    """
-    rows = []
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(row)
+    def __init__(self, csv_path: str):
+        self.csv_path = csv_path
 
-    total_rows = len(rows)
-    completed = 0
-    failed = 0
-    sum_completed_amount = 0
-    sum_all_amount = 0
+    def read_transactions(self) -> Iterator[Dict[str, str]]:
+        try:
+            with open(self.csv_path, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    yield row
+        except FileNotFoundError:
+            raise
+        except csv.Error as e:
+            raise ValueError(f"Invalid CSV format: {e}")
 
-    for row in rows:
+
+class TransactionAggregator:
+    """Computes aggregates from a stream of transactions."""
+
+    def __init__(self):
+        self.total_rows = 0
+        self.completed = 0
+        self.failed = 0
+        self.sum_completed_amount = 0
+        self.sum_all_amount = 0
+
+    def process_transaction(self, row: Dict[str, str]):
+        self.total_rows += 1
         status = row.get("status", "").strip()
         amount_raw = row.get("amount_cents", "0").strip()
         try:
             amount = int(amount_raw)
         except ValueError:
-            # Treat invalid amount as 0 in the baseline implementation
+            # Treat invalid amount as 0, consistent with baseline
             amount = 0
 
-        sum_all_amount += amount
+        self.sum_all_amount += amount
 
         if status == "completed":
-            completed += 1
-            sum_completed_amount += amount
+            self.completed += 1
+            self.sum_completed_amount += amount
         elif status == "failed":
-            failed += 1
+            self.failed += 1
 
-    avg_amount = sum_all_amount / total_rows if total_rows > 0 else 0.0
+    def get_aggregates(self) -> Dict[str, Any]:
+        avg_amount = self.sum_all_amount / self.total_rows if self.total_rows > 0 else 0.0
+        return {
+            "total_rows": self.total_rows,
+            "completed": self.completed,
+            "failed": self.failed,
+            "sum_completed_amount": self.sum_completed_amount,
+            "avg_amount": avg_amount,
+        }
 
-    return {
-        "total_rows": total_rows,
-        "completed": completed,
-        "failed": failed,
-        "sum_completed_amount": sum_completed_amount,
-        "avg_amount": avg_amount,
-    }
+
+class Report:
+    """Structured report representation."""
+
+    def __init__(self, aggregates: Dict[str, Any]):
+        self.aggregates = aggregates
+        # Could add more fields like timings, errors, etc. in the future
 
 
-def _format_report(report: Dict[str, Any]) -> str:
-    lines = [
-        "Transaction report:",
-        f"  total_rows: {report['total_rows']}",
-        f"  completed: {report['completed']}",
-        f"  failed: {report['failed']}",
-        f"  sum_completed_amount: {report['sum_completed_amount']}",
-        f"  avg_amount: {report['avg_amount']}",
-    ]
-    return "\n".join(lines)
+def generate_report(csv_path: str) -> Dict[str, Any]:
+    """Baseline API: returns flat dict of aggregates.
+
+    Preserves original behavior and semantics.
+    """
+    reader = TransactionReader(csv_path)
+    aggregator = TransactionAggregator()
+    for row in reader.read_transactions():
+        aggregator.process_transaction(row)
+    return aggregator.get_aggregates()
+
+
+def generate_full_report(csv_path: str) -> Report:
+    """Enhanced API: returns structured report object."""
+    aggregates = generate_report(csv_path)
+    return Report(aggregates)
+
+
+class TextFormatter:
+    @staticmethod
+    def format(report: Report) -> str:
+        agg = report.aggregates
+        lines = [
+            "Transaction report:",
+            f"  total_rows: {agg['total_rows']}",
+            f"  completed: {agg['completed']}",
+            f"  failed: {agg['failed']}",
+            f"  sum_completed_amount: {agg['sum_completed_amount']}",
+            f"  avg_amount: {agg['avg_amount']}",
+        ]
+        return "\n".join(lines)
+
+
+class JsonFormatter:
+    @staticmethod
+    def format(report: Report) -> str:
+        return json.dumps(report.aggregates, indent=2)
 
 
 def main(argv=None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    if not argv:
-        print("Usage: python transaction_reporter.py <path_to_transactions_csv>")
-        return 1
+    parser = argparse.ArgumentParser(description="Generate transaction reports.")
+    parser.add_argument("csv_path", help="Path to the transactions CSV file")
+    parser.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)"
+    )
+    args = parser.parse_args(argv)
 
-    csv_path = argv[0]
     try:
-        report = generate_report(csv_path)
+        report = generate_full_report(args.csv_path)
     except FileNotFoundError:
-        print(f"Error: file not found: {csv_path}")
+        print(f"Error: file not found: {args.csv_path}", file=sys.stderr)
         return 2
-    except Exception as e:  # baseline: very simple catch-all
-        print(f"Error while processing {csv_path}: {e}")
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 3
+    except Exception as e:
+        print(f"Error while processing {args.csv_path}: {e}", file=sys.stderr)
         return 3
 
-    print(_format_report(report))
+    if args.format == "text":
+        print(TextFormatter.format(report))
+    elif args.format == "json":
+        print(JsonFormatter.format(report))
     return 0
 
 
