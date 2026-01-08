@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Run the project's test suite.
+
+This script prefers pytest if available, otherwise falls back to the standard
+library's unittest discovery. It intentionally uses only the Python standard
+library to prepare and decide which runner to invoke.
+"""
+import sys
+
+try:
+    import pytest  # type: ignore
+except Exception:
+    import unittest
+
+    loader = unittest.TestLoader()
+    suite = loader.discover(".")
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    sys.exit(0 if result.wasSuccessful() else 1)
+else:
+    # If pytest is installed in the environment, use it for nicer output.
+    rc = pytest.main([])
+    sys.exit(rc)
